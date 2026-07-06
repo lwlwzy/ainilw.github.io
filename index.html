@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>淘宝闪购外卖到手价反推售卖价计算器</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --primary: #ff5000;
+      --primary-dark: #e04400;
+      --text: #1f2329;
+      --muted: #5e6670;
+      --border: #e1e4e8;
+      --success: #00b578;
+      --danger: #ff4d4f;
+      --radius: 12px;
+      --shadow: 0 4px 14px rgba(0,0,0,0.06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    header {
+      background: linear-gradient(90deg, #ff5000, #ff7a00);
+      color: #fff;
+      padding: 28px 20px;
+      text-align: center;
+    }
+    header h1 { margin: 0; font-size: 22px; font-weight: 600; }
+    header p { margin: 8px 0 0; opacity: 0.95; font-size: 14px; }
+    .container { max-width: 980px; margin: 0 auto; padding: 24px 16px 60px; }
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 22px;
+      margin-bottom: 20px;
+    }
+    .card h2 { margin: 0 0 16px; font-size: 17px; color: var(--text); }
+    .hint { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+    .field { display: flex; flex-direction: column; }
+    .field label { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    .field input, .field select {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .field input:focus, .field select:focus { border-color: var(--primary); }
+    .field .suffix { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 10px 18px;
+      border: none; border-radius: 8px;
+      font-size: 14px; font-weight: 500; cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-secondary { background: #f0f1f3; color: var(--text); }
+    .btn-secondary:hover { background: #e4e6ea; }
+    .btn-small { padding: 5px 10px; font-size: 12px; }
+    .result { margin-top: 18px; padding: 16px; background: #fff7f2; border-radius: 10px; border-left: 4px solid var(--primary); }
+    .result .price { font-size: 26px; font-weight: 700; color: var(--primary); }
+    .result .breakdown { margin-top: 12px; font-size: 14px; color: var(--muted); }
+    .result .breakdown span { display: inline-block; margin-right: 16px; margin-bottom: 4px; }
+    .error { color: var(--danger); font-size: 14px; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+    th, td { padding: 10px 8px; border-bottom: 1px solid var(--border); text-align: right; }
+    th { text-align: left; color: var(--muted); font-weight: 500; background: #fafbfc; }
+    td:first-child, th:first-child { text-align: left; }
+    .tier-table input { width: 100%; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; background: #e8f5e9; color: #2e7d32; }
+    .tag-error { background: #ffeded; color: var(--danger); }
+    .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    input[type="file"] { font-size: 13px; }
+    .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+    .formula {
+      background: #f8f9fa;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+    .formula code { color: var(--text); background: #fff; padding: 2px 4px; border-radius: 4px; }
+    @media (max-width: 640px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>淘宝闪购外卖到手价反推售卖价计算器</h1>
+    <p>输入期望到手价与平台扣费规则，自动算出应设置的售卖价格</p>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <h2>扣费规则设置（全局默认值）</h2>
+      <div class="formula">
+        公式说明：<br>
+        <code>到手价 = 售卖价 - 售卖价 × (佣金率 + 随单转推广费率) - 配送费 - 保险出资 - 红包出资</code><br>
+        <code>售卖价 = (到手价 + 配送费 + 保险出资 + 红包出资) ÷ (1 - 佣金率 - 随单转推广费率)</code><br>
+        其中红包出资根据下方“红包活动档位”按售卖价自动匹配。<br>
+        <strong>单点不送商品：</strong>仅扣除 <code>平台佣金</code> 与 <code>随单转推广费</code>，不计算配送费、保险出资与红包出资。
+      </div>
+      <div class="grid">
+        <div class="field">
+          <label for="commissionRate">平台佣金率</label>
+          <input id="commissionRate" type="number" step="0.01" value="0" placeholder="例如 5">
+          <span class="suffix">%</span>
+        </div>
+        <div class="field">
+          <label for="techRate">随单转推广费率</label>
+          <input id="techRate" type="number" step="0.01" value="0" placeholder="例如 1">
+          <span class="suffix">%</span>
+        </div>
+        <div class="field">
+          <label for="deliveryFee">商家承担配送费</label>
+          <input id="deliveryFee" type="number" step="0.01" value="0" placeholder="例如 2.5">
+          <span class="suffix">元 / 单</span>
+        </div>
+        <div class="field">
+          <label for="fixedCost">保险出资</label>
+          <input id="fixedCost" type="number" step="0.01" value="0" placeholder="例如 1">
+          <span class="suffix">元 / 单</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>红包活动档位出资</h2>
+      <p class="hint">按表格顺序，自动匹配第一个满足“价格区间起 ≤ 售卖价 &lt; 价格区间止”的档位；价格区间止不填表示无上限。</p>
+      <table class="tier-table" id="tierTable">
+        <thead>
+          <tr>
+            <th style="width:28%">档位名称</th>
+            <th style="width:22%">价格区间起（元）</th>
+            <th style="width:22%">价格区间止（元）</th>
+            <th style="width:18%">商家出资（元）</th>
+            <th style="width:10%"></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="toolbar">
+        <button class="btn btn-secondary" onclick="addTier()">+ 添加档位</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>单条计算</h2>
+      <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+        <div class="field">
+          <label for="singleName">商品名称（可选）</label>
+          <input id="singleName" type="text" placeholder="例如：招牌奶茶">
+        </div>
+        <div class="field">
+          <label for="singleNet">期望到手价</label>
+          <input id="singleNet" type="number" step="0.01" placeholder="例如 10">
+          <span class="suffix">元</span>
+        </div>
+      </div>
+      <div class="field" style="flex-direction: row; align-items: center; gap: 8px; margin-top: 10px;">
+        <input id="singleNoDelivery" type="checkbox" style="width: auto; margin: 0;">
+        <label for="singleNoDelivery" style="margin: 0; color: var(--text);">单点不送商品（仅计算平台佣金 + 随单转推广费）</label>
+      </div>
+      <div class="toolbar">
+        <button class="btn btn-primary" onclick="calculateSingle()">计算售卖价</button>
+        <button class="btn btn-secondary" onclick="addToHistory()">保存到本次记录</button>
+      </div>
+      <div id="singleResult"></div>
+    </div>
+
+    <div class="card">
+      <h2>批量计算（CSV / Excel）</h2>
+      <p class="hint">上传表格，每行一个商品。表格需包含“到手价”列；如果填写“红包档位”列，会按档位名称强制指定，否则按上方价格区间自动匹配。若填写“单点不送”为 是/1/true，则仅扣除佣金与随单转推广费，不计算配送费、保险出资与红包。</p>
+      <div class="toolbar">
+        <input id="batchFile" type="file" accept=".csv,.xlsx,.xls">
+        <button class="btn btn-primary" onclick="processBatch()">开始计算</button>
+        <button class="btn btn-secondary" onclick="downloadTemplate()">下载模板</button>
+        <button class="btn btn-secondary" onclick="exportResults()" id="exportBtn" disabled>导出结果 CSV</button>
+      </div>
+      <div id="batchResult"></div>
+    </div>
+
+    <div class="card">
+      <h2>本次计算记录</h2>
+      <div class="toolbar">
+        <button class="btn btn-secondary" onclick="clearHistory()">清空记录</button>
+      </div>
+      <div id="historyArea"><div class="empty">暂无记录</div></div>
+    </div>
+  </div>
+
+  <script>
+    // 内存中保存记录，不使用 localStorage
+    let history = [];
+    let lastBatchResults = [];
+    let redPacketTiers = [];
+
+    function parseNumberInput(id) {
+      const el = document.getElementById(id);
+      const v = parseFloat(el.value);
+      return isNaN(v) ? 0 : v;
+    }
+
+    function getGlobalRates() {
+      return {
+        commission: parseNumberInput('commissionRate') / 100,
+        tech: parseNumberInput('techRate') / 100,
+        delivery: parseNumberInput('deliveryFee'),
+        fixed: parseNumberInput('fixedCost')
+      };
+    }
+
+    function reverseSellingPrice(net, rates, redPacket, isSingleNoDelivery) {
+      const totalRate = rates.commission + rates.tech;
+      if (totalRate >= 1) return null;
+      if (isSingleNoDelivery) {
+        return net / (1 - totalRate);
+      }
+      return (net + rates.delivery + rates.fixed + redPacket) / (1 - totalRate);
+    }
+
+    function computeBreakdown(sellingPrice, rates, redPacket, isSingleNoDelivery) {
+      const commission = sellingPrice * rates.commission;
+      const tech = sellingPrice * rates.tech;
+      if (isSingleNoDelivery) {
+        const net = sellingPrice - commission - tech;
+        return { sellingPrice, commission, tech, delivery: 0, fixed: 0, redPacket: 0, net };
+      }
+      const net = sellingPrice - commission - tech - rates.delivery - rates.fixed - redPacket;
+      return {
+        sellingPrice, commission, tech,
+        delivery: rates.delivery, fixed: rates.fixed, redPacket, net
+      };
+    }
+
+    function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
+
+    function validateRates(rates) {
+      const totalRate = rates.commission + rates.tech;
+      if (totalRate >= 1) return '扣费比例合计达到或超过 100%，无法反推售卖价，请检查费率设置。';
+      return null;
+    }
+
+    // 红包档位管理
+    function renderTiers() {
+      const tbody = document.querySelector('#tierTable tbody');
+      if (!redPacketTiers.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">暂无档位，点击“添加档位”</td></tr>';
+      } else {
+        tbody.innerHTML = redPacketTiers.map((t, i) => `
+          <tr>
+            <td><input type="text" value="${t.name || ''}" onchange="redPacketTiers[${i}].name=this.value;" placeholder="如 3元红包"></td>
+            <td><input type="number" step="0.01" value="${isFinite(t.start) ? t.start : ''}" onchange="redPacketTiers[${i}].start=parseFloat(this.value)||0;" placeholder="0"></td>
+            <td><input type="number" step="0.01" value="${isFinite(t.end) ? t.end : ''}" onchange="redPacketTiers[${i}].end=parseFloat(this.value)||null;" placeholder="不填则无上限"></td>
+            <td><input type="number" step="0.01" value="${t.amount}" onchange="redPacketTiers[${i}].amount=parseFloat(this.value)||0;" placeholder="0"></td>
+            <td><button class="btn btn-secondary btn-small" onclick="removeTier(${i})">删除</button></td>
+          </tr>`).join('');
+      }
+    }
+
+    function addTier() {
+      redPacketTiers.push({ name: '', start: 0, end: null, amount: 0 });
+      renderTiers();
+    }
+
+    function removeTier(index) {
+      redPacketTiers.splice(index, 1);
+      renderTiers();
+    }
+
+    function getTierStart(t) { return (t.start === undefined || t.start === null || isNaN(t.start)) ? -Infinity : t.start; }
+    function getTierEnd(t) { return (t.end === undefined || t.end === null || isNaN(t.end)) ? Infinity : t.end; }
+
+    function findTierByPrice(price) {
+      for (const t of redPacketTiers) {
+        if (price >= getTierStart(t) && price < getTierEnd(t)) return t;
+      }
+      return null;
+    }
+
+    function getTierByName(name) {
+      if (!name) return null;
+      const n = String(name).trim();
+      const exact = redPacketTiers.find(t => t.name && t.name.trim() === n);
+      if (exact) return exact;
+      return redPacketTiers.find(t => t.name && t.name.trim().includes(n)) || null;
+    }
+
+    // 自动匹配红包档位并反推售卖价；可传入强制档位金额（批量表格里的手动指定）
+    function solveSellingPrice(net, rates, forcedAmount, isSingleNoDelivery) {
+      if (isSingleNoDelivery) {
+        const selling = reverseSellingPrice(net, rates, 0, true);
+        return { selling, tier: { name: '单点不送', amount: 0 }, amount: 0 };
+      }
+      let amount = (typeof forcedAmount === 'number') ? forcedAmount : 0;
+      let selling = reverseSellingPrice(net, rates, amount);
+      if (selling === null || selling <= 0) return { selling, tier: null, amount: 0 };
+
+      for (let i = 0; i < 30; i++) {
+        const tier = (typeof forcedAmount === 'number') ? { amount: forcedAmount } : findTierByPrice(selling);
+        const newAmount = tier ? tier.amount : 0;
+        const newSelling = reverseSellingPrice(net, rates, newAmount);
+        if (newSelling === null || newSelling <= 0) return { selling, tier, amount: newAmount };
+        if (Math.abs(newSelling - selling) < 0.001 && newAmount === amount) {
+          selling = newSelling;
+          amount = newAmount;
+          break;
+        }
+        selling = newSelling;
+        amount = newAmount;
+      }
+      const finalTier = (typeof forcedAmount === 'number') ? { name: '手动指定', amount: forcedAmount } : findTierByPrice(selling);
+      return { selling, tier: finalTier, amount };
+    }
+
+    // 单条计算
+    let lastSingleResult = null;
+
+    function calculateSingle() {
+      const rates = getGlobalRates();
+      const err = validateRates(rates);
+      const net = parseNumberInput('singleNet');
+      const isSingleNoDelivery = document.getElementById('singleNoDelivery').checked;
+      const container = document.getElementById('singleResult');
+      if (err) { container.innerHTML = `<div class="error">${err}</div>`; lastSingleResult = null; return; }
+      if (net <= 0) { container.innerHTML = `<div class="error">请输入大于 0 的到手价。</div>`; lastSingleResult = null; return; }
+
+      const solved = solveSellingPrice(net, rates, undefined, isSingleNoDelivery);
+      if (solved.selling === null || solved.selling <= 0) { container.innerHTML = `<div class="error">计算失败，请检查扣费比例。</div>`; lastSingleResult = null; return; }
+      const b = computeBreakdown(solved.selling, rates, solved.amount, isSingleNoDelivery);
+      const rpName = solved.tier ? solved.tier.name : '';
+      lastSingleResult = {
+        name: document.getElementById('singleName').value.trim() || '未命名商品',
+        redPacketName: rpName,
+        isSingleNoDelivery,
+        net, ...b
+      };
+      container.innerHTML = `
+        <div class="result">
+          <div>建议售卖价：<span class="price">${round2(b.sellingPrice).toFixed(2)}</span> 元 ${isSingleNoDelivery ? '<span class="tag">单点不送</span>' : ''}</div>
+          <div class="breakdown">
+            <span>平台佣金：-${round2(b.commission).toFixed(2)} 元</span>
+            <span>随单转推广费：-${round2(b.tech).toFixed(2)} 元</span>
+            ${b.redPacket > 0 ? `<span>红包档位：${rpName || '红包'}（-${round2(b.redPacket).toFixed(2)} 元）</span>` : '<span>红包档位：无</span>'}
+            <span>配送费：-${round2(b.delivery).toFixed(2)} 元</span>
+            <span>保险出资：-${round2(b.fixed).toFixed(2)} 元</span>
+            <span style="color:var(--success)">校验到手价：${round2(b.net).toFixed(2)} 元</span>
+          </div>
+        </div>`;
+    }
+
+    function addToHistory() {
+      if (!lastSingleResult) { alert('请先点击“计算售卖价”'); return; }
+      history.unshift({ ...lastSingleResult, time: new Date().toLocaleString() });
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const area = document.getElementById('historyArea');
+      if (!history.length) { area.innerHTML = '<div class="empty">暂无记录</div>'; return; }
+      const rows = history.map(h => `
+        <tr>
+          <td>${h.time}</td>
+          <td>${h.name}</td>
+          <td>${h.net.toFixed(2)}</td>
+          <td style="font-weight:600;color:var(--primary)">${round2(h.sellingPrice).toFixed(2)}</td>
+          <td>${round2(h.commission + h.tech + h.delivery + h.fixed + h.redPacket).toFixed(2)}</td>
+        </tr>`).join('');
+      area.innerHTML = `
+        <table>
+          <thead><tr><th>时间</th><th>商品</th><th>到手价</th><th>售卖价</th><th>总扣费</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    function clearHistory() { history = []; renderHistory(); }
+
+    function downloadTemplate() {
+      const csv = '\ufeff商品名称,到手价,佣金率(%),随单转推广费率(%),配送费(元),保险出资(元),单点不送,红包档位（可选）\n示例商品A,10,5,1,2,1,,\n示例商品B,20,5,1,2.5,0.5,是,';
+      downloadBlob(csv, '批量计算模板.csv', 'text/csv;charset=utf-8;');
+    }
+
+    function downloadBlob(content, filename, type) {
+      const blob = new Blob([content], { type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function processBatch() {
+      const fileInput = document.getElementById('batchFile');
+      const container = document.getElementById('batchResult');
+      lastBatchResults = [];
+      if (!fileInput.files.length) { container.innerHTML = '<div class="error">请先选择 CSV 或 Excel 文件。</div>'; return; }
+      const file = fileInput.files[0];
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (ext === 'csv') {
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => handleBatchData(results.data),
+          error: (err) => { container.innerHTML = `<div class="error">解析 CSV 失败：${err.message}</div>`; }
+        });
+      } else if (['xlsx','xls'].includes(ext)) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+            handleBatchArray(json);
+          } catch (err) {
+            container.innerHTML = `<div class="error">解析 Excel 失败：${err.message}</div>`;
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        container.innerHTML = '<div class="error">仅支持 .csv、.xlsx、.xls 文件。</div>';
+      }
+    }
+
+    function handleBatchArray(rows) {
+      if (!rows || rows.length < 2) { document.getElementById('batchResult').innerHTML = '<div class="error">表格数据为空或缺少表头。</div>'; return; }
+      const headers = rows[0].map(h => String(h).trim());
+      const data = rows.slice(1).map(r => {
+        const obj = {};
+        headers.forEach((h, i) => obj[h] = r[i]);
+        return obj;
+      });
+      handleBatchData(data);
+    }
+
+    function findField(obj, keys) {
+      const lowerKeys = Object.keys(obj).map(k => [k, String(k).toLowerCase()]);
+      for (const key of keys) {
+        const lk = key.toLowerCase();
+        const found = lowerKeys.find(([orig, l]) => l === lk || l.includes(lk));
+        if (found) return obj[found[0]];
+      }
+      return undefined;
+    }
+
+    function parseRate(value, defaultValue) {
+      if (value === undefined || value === null || value === '') return defaultValue;
+      const s = String(value).trim().replace('%', '');
+      const n = parseFloat(s);
+      if (isNaN(n)) return defaultValue;
+      return n > 1 ? n / 100 : n;
+    }
+
+    function parseYuanValue(value, defaultValue) {
+      if (value === undefined || value === null || value === '') return defaultValue;
+      const n = parseFloat(String(value).replace(/,/g, ''));
+      return isNaN(n) ? defaultValue : n;
+    }
+
+    function parseBoolean(value, defaultValue) {
+      if (value === undefined || value === null || value === '') return defaultValue;
+      const s = String(value).trim().toLowerCase();
+      if (['是','1','true','yes','y','对','有'].includes(s)) return true;
+      if (['否','0','false','no','n','无'].includes(s)) return false;
+      return defaultValue;
+    }
+
+    function handleBatchData(data) {
+      const container = document.getElementById('batchResult');
+      const globalRates = getGlobalRates();
+      const err = validateRates(globalRates);
+      if (err) { container.innerHTML = `<div class="error">${err}</div>`; return; }
+
+      lastBatchResults = data.map((row, idx) => {
+        const name = findField(row, ['商品名称','名称','商品','name','菜品','产品']) || '';
+        const net = parseYuanValue(findField(row, ['到手价','到手价格','实际到账','净收入','net','收入']), NaN);
+        const isSingleNoDelivery = parseBoolean(findField(row, ['单点不送','不送','单点','noDelivery','no delivery','自提','不配送']), false);
+        const rates = {
+          commission: parseRate(findField(row, ['佣金率','佣金','commission rate','commission']), globalRates.commission),
+          tech: parseRate(findField(row, ['随单转推广费率','技术服务费率','技术服务费','tech rate','tech']), globalRates.tech),
+          delivery: parseYuanValue(findField(row, ['配送费','运费','delivery']), globalRates.delivery),
+          fixed: parseYuanValue(findField(row, ['保险出资','固定成本','包装费','其他成本','fixed','cost']), globalRates.fixed)
+        };
+
+        // 红包：如果表格指定了档位名称，则强制使用该档位；否则按售卖价自动匹配（单点不送不参与红包）
+        let forcedAmount;
+        let redPacketName = '';
+        if (!isSingleNoDelivery) {
+          const rpNameCol = findField(row, ['红包档位','红包','red packet','档位','活动档位']);
+          if (rpNameCol) {
+            const tier = getTierByName(rpNameCol);
+            if (tier) {
+              forcedAmount = tier.amount;
+              redPacketName = tier.name;
+            }
+          }
+        }
+
+        if (isNaN(net) || net <= 0) {
+          return { row: idx + 1, name, net, error: '到手价缺失或无效', rates, isSingleNoDelivery, redPacket: forcedAmount || 0, redPacketName };
+        }
+        const totalRate = rates.commission + rates.tech;
+        if (totalRate >= 1) {
+          return { row: idx + 1, name, net, error: '扣费比例合计≥100%', rates, isSingleNoDelivery, redPacket: forcedAmount || 0, redPacketName };
+        }
+        const solved = solveSellingPrice(net, rates, forcedAmount, isSingleNoDelivery);
+        if (solved.selling === null || solved.selling <= 0) {
+          return { row: idx + 1, name, net, error: '计算失败', rates, isSingleNoDelivery, redPacket: solved.amount, redPacketName };
+        }
+        const b = computeBreakdown(solved.selling, rates, solved.amount, isSingleNoDelivery);
+        if (!redPacketName && solved.tier) redPacketName = solved.tier.name;
+        return { row: idx + 1, name, net, isSingleNoDelivery, ...b, rates, redPacketName };
+      });
+
+      renderBatchResults();
+      document.getElementById('exportBtn').disabled = false;
+    }
+
+    function renderBatchResults() {
+      const container = document.getElementById('batchResult');
+      if (!lastBatchResults.length) { container.innerHTML = '<div class="empty">没有可展示的数据。</div>'; return; }
+      const rows = lastBatchResults.map(r => {
+        if (r.error) {
+          return `<tr><td>${r.row}</td><td>${r.name || '-'}</td><td colspan="7"><span class="tag tag-error">${r.error}</span></td></tr>`;
+        }
+        return `<tr>
+          <td>${r.row}</td>
+          <td>${r.name || '-'}</td>
+          <td style="font-weight:600;color:var(--primary)">${round2(r.sellingPrice).toFixed(2)}</td>
+          <td>${r.net.toFixed(2)}</td>
+          <td>${round2(r.commission).toFixed(2)}</td>
+          <td>${round2(r.tech).toFixed(2)}</td>
+          <td>${r.isSingleNoDelivery ? '<span class="tag">单点不送</span>' : (r.redPacketName || (r.redPacket > 0 ? '红包' : '-'))}</td>
+          <td>${round2(r.redPacket).toFixed(2)}</td>
+          <td>${round2(r.delivery + r.fixed).toFixed(2)}</td>
+        </tr>`;
+      }).join('');
+      container.innerHTML = `
+        <table>
+          <thead>
+            <tr><th>行号</th><th>商品名称</th><th>售卖价</th><th>到手价</th><th>佣金</th><th>随单转推广费</th><th>红包档位 / 单点不送</th><th>红包出资</th><th>配送费+保险出资</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    function exportResults() {
+      if (!lastBatchResults.length) return;
+      const data = lastBatchResults.map(r => ({
+        行号: r.row,
+        商品名称: r.name || '',
+        售卖价: r.error ? '' : round2(r.sellingPrice).toFixed(2),
+        到手价: isNaN(r.net) ? '' : r.net.toFixed(2),
+        佣金: r.error ? '' : round2(r.commission).toFixed(2),
+        随单转推广费: r.error ? '' : round2(r.tech).toFixed(2),
+        单点不送: r.isSingleNoDelivery ? '是' : '',
+        红包档位: r.redPacketName || '',
+        红包出资: r.error ? '' : round2(r.redPacket).toFixed(2),
+        配送费: r.error ? '' : round2(r.delivery).toFixed(2),
+        保险出资: r.error ? '' : round2(r.fixed).toFixed(2),
+        错误信息: r.error || ''
+      }));
+      const csv = '\ufeff' + Papa.unparse(data);
+      downloadBlob(csv, '售卖价计算结果.csv', 'text/csv;charset=utf-8;');
+    }
+
+    // 初始化
+    renderTiers();
+  </script>
+</body>
+</html>
